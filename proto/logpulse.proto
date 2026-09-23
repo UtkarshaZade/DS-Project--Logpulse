@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package logpulse;
+
+// A single structured log entry emitted by a microservice.
+message LogRecord {
+  string timestamp   = 1;  // wall-clock time, kept for human readability only
+  string service_id  = 2;  // which microservice emitted this
+  string trace_id    = 3;  // correlates a single request as it flows across services
+  string log_level   = 4;  // INFO / WARN / ERROR / DEBUG
+  string message     = 5;  // the human-readable log message
+  int64  lamport_clock = 6; // logical clock value - the TRUE ordering, independent of wall-clock drift
+}
+
+message StreamAck {
+  int32 records_received = 1;
+  string status = 2;
+}
+
+service LogAggregator {
+  rpc StreamLogs(stream LogRecord) returns (StreamAck);
+}

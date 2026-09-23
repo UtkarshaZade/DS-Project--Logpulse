@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LogPulse Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1b1f28;
+    --border: #333a48;
+    --text: #f5f6f8;
+    --muted: #c3cad6;
+    --up: #4ade95;
+    --down: #ff5c61;
+    --error: #ff5c61;
+    --warn: #f5c451;
+    --info: #6fb1ec;
+    --debug: #a7afbd;
+    --accent: #6fb1ec;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    padding: 28px;
+    font-size: 16px;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 6px 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 16px;
+    margin-bottom: 28px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 22px;
+  }
+  .panel h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 10px 0;
+    color: var(--text);
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+  code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .health-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  .health-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .health-card .name {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .health-card .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot.up { background: var(--up); box-shadow: 0 0 8px var(--up); }
+  .dot.down { background: var(--down); box-shadow: 0 0 8px var(--down); }
+
+  .lock-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 15px;
+  }
+  .lock-card .badge {
+    padding: 5px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .badge.held { background: rgba(245, 196, 81, 0.2); color: var(--warn); }
+  .badge.free { background: rgba(74, 222, 149, 0.2); color: var(--up); }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  select, input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: 15px;
+  }
+  input[type="text"] { flex: 1; min-width: 220px; }
+  button {
+    background: var(--accent);
+    border: none;
+    color: #0f1115;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 9px 18px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.88; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td {
+    text-align: left;
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--border);
+    font-family: "SF Mono", Consolas, monospace;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  th {
+    color: var(--muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 12px;
+  }
+  td.message { white-space: normal; font-family: inherit; }
+  .level { font-weight: 700; }
+  .level.ERROR { color: var(--error); }
+  .level.WARN { color: var(--warn); }
+  .level.INFO { color: var(--info); }
+  .level.DEBUG { color: var(--debug); }
+
+  .trace-row.error-row { background: rgba(255, 92, 97, 0.12); }
+  .lamport-jump {
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    margin-left: 8px;
+  }
+  .empty { color: var(--muted); font-size: 15px; padding: 14px 0; }
+</style>
+</head>
+<body>
+
+<h1>LogPulse</h1>
+<div class="subtitle">Distributed log aggregation &amp; observability</div>
+
+<div class="panel">
+  <h2>Service Health</h2>
+  <div class="hint">Live via a beacon protocol: each service refreshes a Redis key with a short expiry every 3s. If a service goes silent, Redis deletes the key on its own — no manual failure detection needed.</div>
+  <div class="health-row" id="health-row"></div>
+</div>
+
+<div class="panel">
+  <h2>Mutual Exclusion — Archive Lock</h2>
+  <div class="hint">Two independent workers periodically compete to run a maintenance task. Redis's atomic <code>SET ... NX</code> guarantees only one ever holds the lock at a time.</div>
+  <div id="lock-status"></div>
+</div>
+
+<div class="panel">
+  <h2>Trace Lookup</h2>
+  <div class="hint">Ordered by <strong>Lamport logical clock</strong>, not wall-clock time. If a request's clock jumps by more than 1, it means that service's event was causally triggered by another service's event elsewhere.</div>
+  <div class="controls">
+    <input type="text" id="trace-input" placeholder="e.g. trace-incident-001" />
+    <button onclick="lookupTrace()">Trace</button>
+  </div>
+  <div id="trace-result"><div class="empty">Enter a trace ID to reconstruct its path across services, ordered by Lamport clock.</div></div>
+</div>
+
+<div class="panel">
+  <h2>Live Logs</h2>
+  <div class="hint">Streamed by 4 independent agents through gRPC, buffered in a Redis Stream, and durably stored by 2 competing workers.</div>
+  <div class="controls">
+    <select id="filter-level">
+      <option value="">All levels</option>
+      <option value="ERROR">ERROR</option>
+      <option value="INFO">INFO</option>
+      <option value="DEBUG">DEBUG</option>
+    </select>
+    <select id="filter-service">
+      <option value="">All services</option>
+      <option value="auth-service">auth-service</option>
+      <option value="inventory-service">inventory-service</option>
+      <option value="payment-gateway">payment-gateway</option>
+      <option value="order-service">order-service</option>
+    </select>
+  </div>
+  <div id="logs-table"></div>
+</div>
+
+<script>
+const SERVICES = ["auth-service", "inventory-service", "payment-gateway", "order-service"];
+
+async function refreshHealth() {
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    const row = document.getElementById('health-row');
+    row.innerHTML = SERVICES.map(s => {
+      const info = data[s] || { status: 'down', last_seen: null };
+      const up = info.status === 'up';
+      return `<div class="health-card">
+        <div class="name">${s}</div>
+        <div class="status"><span class="dot ${up ? 'up' : 'down'}"></span>${up ? 'Up' : 'Down'} ${info.last_seen ? '· ' + info.last_seen.split('T')[1] : ''}</div>
+      </div>`;
+    }).join('');
+  } catch (e) { /* silently retry next tick */ }
+}
+
+async function refreshLockStatus() {
+  try {
+    const res = await fetch('/api/lock-status');
+    const data = await res.json();
+    const el = document.getElementById('lock-status');
+    if (data.holder) {
+      el.innerHTML = `<div class="lock-card">
+        <span class="badge held">HELD</span>
+        <span><strong>${data.holder}</strong> is running the exclusive maintenance sweep (auto-releases in ${data.ttl_remaining}s if not finished sooner)</span>
+      </div>`;
+    } else {
+      el.innerHTML = `<div class="lock-card"><span class="badge free">FREE</span><span>No worker currently holds the lock — either worker may acquire it next cycle</span></div>`;
+    }
+  } catch (e) { /* silently retry next tick */ }
+}
+
+async function refreshLogs() {
+  const level = document.getElementById('filter-level').value;
+  const service = document.getElementById('filter-service').value;
+  const params = new URLSearchParams({ limit: 30 });
+  if (level) params.set('level', level);
+  if (service) params.set('service', service);
+
+  try {
+    const res = await fetch('/api/logs?' + params.toString());
+    const rows = await res.json();
+    const container = document.getElementById('logs-table');
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty">No logs match this filter.</div>';
+      return;
+    }
+    container.innerHTML = `<table>
+      <thead><tr><th>Time</th><th>Service</th><th>Level</th><th>Lamport</th><th>Trace</th><th>Message</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${r.timestamp}</td>
+        <td>${r.service_id}</td>
+        <td class="level ${r.log_level}">${r.log_level}</td>
+        <td>${r.lamport_clock}</td>
+        <td>${r.trace_id}</td>
+        <td class="message">${r.message}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  } catch (e) { /* silently retry next tick */ }
+}
+
+async function lookupTrace() {
+  const traceId = document.getElementById('trace-input').value.trim();
+  const container = document.getElementById('trace-result');
+  if (!traceId) return;
+
+  try {
+    const res = await fetch('/api/trace/' + encodeURIComponent(traceId));
+    const rows = await res.json();
+    if (!rows.length) {
+      container.innerHTML = '<div class="empty">No records found for this trace ID.</div>';
+      return;
+    }
+    let prevClock = null;
+    container.innerHTML = `<table>
+      <thead><tr><th>Time</th><th>Service</th><th>Level</th><th>Lamport</th><th>Message</th></tr></thead>
+      <tbody>${rows.map(r => {
+        const jump = prevClock !== null && r.lamport_clock > prevClock + 1
+          ? `<span class="lamport-jump">← causal jump from ${prevClock}</span>` : '';
+        prevClock = r.lamport_clock;
+        const rowClass = r.log_level === 'ERROR' ? 'trace-row error-row' : 'trace-row';
+        return `<tr class="${rowClass}">
+          <td>${r.timestamp}</td>
+          <td>${r.service_id}</td>
+          <td class="level ${r.log_level}">${r.log_level}</td>
+          <td>${r.lamport_clock}${jump}</td>
+          <td class="message">${r.message}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch (e) {
+    container.innerHTML = '<div class="empty">Error looking up trace.</div>';
+  }
+}
+
+document.getElementById('filter-level').addEventListener('change', refreshLogs);
+document.getElementById('filter-service').addEventListener('change', refreshLogs);
+document.getElementById('trace-input').addEventListener('keydown', e => { if (e.key === 'Enter') lookupTrace(); });
+
+refreshHealth();
+refreshLogs();
+refreshLockStatus();
+setInterval(refreshHealth, 3000);
+setInterval(refreshLogs, 3000);
+setInterval(refreshLockStatus, 2000);
+</script>
+
+</body>
+</html>

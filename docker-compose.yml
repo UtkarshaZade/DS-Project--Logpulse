@@ -1,0 +1,110 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: logpulse-redis
+    ports:
+      - "6379:6379"
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: aggregator/Dockerfile
+    container_name: logpulse-aggregator
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+    ports:
+      - "50051:50051"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: logpulse-worker
+    depends_on:
+      - redis
+      - aggregator
+    environment:
+      - REDIS_HOST=redis
+    volumes:
+      - ./storage:/app/storage
+    command: ["python", "consumer.py", "worker-1"]
+
+  worker2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: logpulse-worker2
+    depends_on:
+      - redis
+      - aggregator
+    environment:
+      - REDIS_HOST=redis
+    volumes:
+      - ./storage:/app/storage
+    command: ["python", "consumer.py", "worker-2"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: logpulse-dashboard
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+    volumes:
+      - ./storage:/app/storage:ro
+    ports:
+      - "5000:5000"
+
+  agent-auth:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: logpulse-agent-auth
+    depends_on:
+      - aggregator
+    environment:
+      - AGGREGATOR_HOST=aggregator
+      - REDIS_HOST=redis
+      - SERVICE_NAME=auth-service
+
+  agent-inventory:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: logpulse-agent-inventory
+    depends_on:
+      - aggregator
+    environment:
+      - AGGREGATOR_HOST=aggregator
+      - REDIS_HOST=redis
+      - SERVICE_NAME=inventory-service
+
+  agent-payment:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: logpulse-agent-payment
+    depends_on:
+      - aggregator
+    environment:
+      - AGGREGATOR_HOST=aggregator
+      - REDIS_HOST=redis
+      - SERVICE_NAME=payment-gateway
+
+  agent-order:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: logpulse-agent-order
+    depends_on:
+      - aggregator
+    environment:
+      - AGGREGATOR_HOST=aggregator
+      - REDIS_HOST=redis
+      - SERVICE_NAME=order-service
